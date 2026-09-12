@@ -316,7 +316,7 @@ function bindEvents() {
       title: data.title.trim(),
       priority: data.priority,
       cost: Number(data.cost || 0),
-      status: data.status,
+      status: "todo",
       photo: data.photo.trim(),
       note: data.note.trim(),
       completedAt: null,
