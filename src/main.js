@@ -17,18 +17,7 @@ const priorities = {
 let state = loadState();
 const app = document.querySelector("#app");
 
-function loadState() {
-  const saved = localStorage.getItem(STORAGE_KEY);
-  if (saved) {
-    const parsed = JSON.parse(saved);
-    parsed.editingId = null;
-    parsed.repairs = (parsed.repairs || []).map((repair) => ({
-      ...repair,
-      cost: Number(repair.cost) || 0,
-      completedAt: repair.status === "done" ? repair.completedAt || null : null
-    }));
-    return parsed;
-  }
+function defaultState() {
   return {
     filter: "all",
     editingId: null,
@@ -45,6 +34,79 @@ function loadState() {
         completedAt: null
       }
     ]
+  };
+}
+
+// 数据损坏时的安全回退：空列表，不编造任何维修记录
+function emptyState() {
+  return { filter: "all", editingId: null, repairs: [] };
+}
+
+function loadState() {
+  let saved;
+  try {
+    saved = localStorage.getItem(STORAGE_KEY);
+  } catch {
+    return defaultState();
+  }
+  if (!saved) return defaultState();
+
+  let parsed;
+  try {
+    parsed = JSON.parse(saved);
+  } catch {
+    return recover();
+  }
+
+  // 顶层结构损坏（非对象、repairs 缺失或不是数组）：回退空数据
+  if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.repairs)) {
+    return recover();
+  }
+
+  let repairs;
+  try {
+    repairs = parsed.repairs.map(normalizeRepair);
+  } catch {
+    return recover();
+  }
+  // 任一事项字段缺失或非法，整份数据视为不可用
+  if (repairs.some((repair) => !repair)) return recover();
+
+  const filter = typeof parsed.filter === "string" && parsed.filter in statuses ? parsed.filter : "all";
+  return { filter, editingId: null, repairs };
+}
+
+// 坏数据无法修复：回退空数据并立刻写回，避免下次刷新继续读到坏数据
+function recover() {
+  const fallback = emptyState();
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(fallback));
+  } catch {
+    // localStorage 不可用时仅在本次会话内存中回退
+  }
+  return fallback;
+}
+
+function normalizeRepair(raw) {
+  if (!raw || typeof raw !== "object") throw new Error("invalid repair");
+
+  const { id, location, title, priority, cost, status, photo, note, completedAt } = raw;
+  if (typeof location !== "string" || !location.trim()) return null;
+  if (typeof title !== "string" || !title.trim()) return null;
+  if (!(priority in priorities)) return null;
+  if (!(status in statuses) || status === "all") return null;
+
+  const doneAt = status === "done" && typeof completedAt === "string" && !Number.isNaN(new Date(completedAt).getTime()) ? completedAt : null;
+  return {
+    id: typeof id === "string" && id ? id : crypto.randomUUID(),
+    location,
+    title,
+    priority,
+    cost: Number(cost) || 0,
+    status,
+    photo: typeof photo === "string" ? photo : "",
+    note: typeof note === "string" ? note : "",
+    completedAt: doneAt
   };
 }
 
