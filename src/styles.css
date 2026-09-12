@@ -56,7 +56,7 @@ h1 {
 .stats {
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(3, minmax(110px, 1fr));
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
 }
 
 .stat,
@@ -177,6 +177,46 @@ textarea {
   overflow: hidden;
 }
 
+.repair.editing {
+  grid-template-columns: 1fr;
+  padding: 16px;
+}
+
+.edit-form {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.edit-form .wide {
+  grid-column: 1 / -1;
+}
+
+.edit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.edit-actions .primary {
+  min-width: 120px;
+}
+
+.edit-title {
+  cursor: pointer;
+  text-decoration: underline dotted #98a194;
+  text-underline-offset: 4px;
+}
+
+.edit-title:hover {
+  color: #526d4e;
+}
+
+.done-time {
+  background: #d8ead6;
+  color: #376336;
+}
+
 .photo {
   align-items: center;
   background: #e4e8df;
@@ -289,10 +329,14 @@ textarea {
   }
 
   .stats {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, 1fr);
   }
 
   .repair {
+    grid-template-columns: 1fr;
+  }
+
+  .edit-form {
     grid-template-columns: 1fr;
   }
 

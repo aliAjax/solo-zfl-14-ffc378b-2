@@ -19,9 +19,19 @@ const app = document.querySelector("#app");
 
 function loadState() {
   const saved = localStorage.getItem(STORAGE_KEY);
-  if (saved) return JSON.parse(saved);
+  if (saved) {
+    const parsed = JSON.parse(saved);
+    parsed.editingId = null;
+    parsed.repairs = (parsed.repairs || []).map((repair) => ({
+      ...repair,
+      cost: Number(repair.cost) || 0,
+      completedAt: repair.status === "done" ? repair.completedAt || null : null
+    }));
+    return parsed;
+  }
   return {
     filter: "all",
+    editingId: null,
     repairs: [
       {
         id: crypto.randomUUID(),
@@ -31,7 +41,8 @@ function loadState() {
         cost: 260,
         status: "todo",
         photo: "",
-        note: "先检查软管接口"
+        note: "先检查软管接口",
+        completedAt: null
       }
     ]
   };
@@ -41,10 +52,22 @@ function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
+// 统一处理状态切换：切到已完成时记录完成时间，离开已完成时清空
+function applyStatus(repair, nextStatus) {
+  if (nextStatus === "done" && repair.status !== "done") {
+    repair.completedAt = new Date().toISOString();
+  } else if (nextStatus !== "done") {
+    repair.completedAt = null;
+  }
+  repair.status = nextStatus;
+}
+
 function render() {
   const repairs = filteredRepairs();
   const unfinished = state.repairs.filter((repair) => repair.status !== "done");
-  const totalCost = unfinished.reduce((total, repair) => total + Number(repair.cost || 0), 0);
+  const finished = state.repairs.filter((repair) => repair.status === "done");
+  const totalCost = unfinished.reduce((total, repair) => total + (Number(repair.cost) || 0), 0);
+  const spentCost = finished.reduce((total, repair) => total + (Number(repair.cost) || 0), 0);
   const doing = state.repairs.filter((repair) => repair.status === "doing").length;
 
   app.innerHTML = `
@@ -57,7 +80,8 @@ function render() {
         <section class="stats">
           <div class="stat"><span>未完成</span><strong>${unfinished.length}</strong></div>
           <div class="stat"><span>处理中</span><strong>${doing}</strong></div>
-          <div class="stat"><span>预计费用</span><strong>¥${totalCost}</strong></div>
+          <div class="stat"><span>未完成预计费用</span><strong>¥${totalCost}</strong></div>
+          <div class="stat"><span>已完成支出</span><strong>¥${spentCost}</strong></div>
         </section>
       </header>
 
@@ -92,25 +116,49 @@ function render() {
 }
 
 function renderRepair(repair) {
+  if (state.editingId === repair.id) return renderEditRepair(repair);
+
   return `
     <article class="repair">
       <div class="photo">${repair.photo ? `<img src="${escapeHtml(repair.photo)}" alt="${escapeHtml(repair.location)}维修照片">` : "未添加照片"}</div>
       <div class="content">
         <div class="row">
-          <h3>${escapeHtml(repair.location)}</h3>
+          <h3 class="edit-title" data-edit="${repair.id}" title="点击编辑">${escapeHtml(repair.location)}</h3>
           <span class="priority ${repair.priority}">${priorities[repair.priority]}</span>
           <span class="status ${repair.status}">${statuses[repair.status]}</span>
         </div>
         <p>${escapeHtml(repair.title)}</p>
         <div class="row">
-          <span class="chip">预计 ¥${Number(repair.cost || 0)}</span>
+          <span class="chip">${repair.status === "done" ? "支出" : "预计"} ¥${Number(repair.cost || 0)}</span>
+          ${repair.completedAt ? `<span class="chip done-time">完成于 ${formatDateTime(repair.completedAt)}</span>` : ""}
           <span class="chip">${escapeHtml(repair.note || "暂无备注")}</span>
         </div>
         <div class="actions">
           <select data-status="${repair.id}">${renderStatusOptions(repair.status)}</select>
+          <button class="ghost" data-edit="${repair.id}">编辑</button>
           <button class="ghost" data-delete="${repair.id}">删除</button>
         </div>
       </div>
+    </article>
+  `;
+}
+
+function renderEditRepair(repair) {
+  return `
+    <article class="repair editing">
+      <form class="edit-form" data-edit-form="${repair.id}">
+        <label>位置<input name="location" required value="${escapeHtml(repair.location)}"></label>
+        <label>优先级<select name="priority">${renderPriorityOptions(repair.priority)}</select></label>
+        <label>预计费用<input name="cost" type="number" min="0" step="1" value="${Number(repair.cost || 0)}"></label>
+        <label>处理状态<select name="status">${renderStatusOptions(repair.status)}</select></label>
+        <label class="wide">问题描述<textarea name="title" required>${escapeHtml(repair.title)}</textarea></label>
+        <label class="wide">照片链接<input name="photo" type="url" value="${escapeHtml(repair.photo || "")}" placeholder="可选，粘贴图片地址"></label>
+        <label class="wide">备注<textarea name="note" placeholder="师傅电话、材料或注意事项">${escapeHtml(repair.note || "")}</textarea></label>
+        <div class="wide edit-actions">
+          <button class="primary" type="submit">保存修改</button>
+          <button class="ghost" type="button" data-cancel="${repair.id}">取消</button>
+        </div>
+      </form>
     </article>
   `;
 }
@@ -128,11 +176,17 @@ function renderPriorityOptions(selected) {
     .join("");
 }
 
+function formatDateTime(iso) {
+  const date = new Date(iso);
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 function bindEvents() {
   document.querySelector("#repair-form").addEventListener("submit", (event) => {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(event.target));
-    state.repairs.unshift({
+    const repair = {
       id: crypto.randomUUID(),
       location: data.location.trim(),
       title: data.title.trim(),
@@ -140,8 +194,11 @@ function bindEvents() {
       cost: Number(data.cost || 0),
       status: data.status,
       photo: data.photo.trim(),
-      note: data.note.trim()
-    });
+      note: data.note.trim(),
+      completedAt: null
+    };
+    applyStatus(repair, data.status);
+    state.repairs.unshift(repair);
     saveState();
     render();
   });
@@ -157,8 +214,40 @@ function bindEvents() {
   document.querySelectorAll("[data-status]").forEach((select) => {
     select.addEventListener("change", () => {
       const repair = state.repairs.find((item) => item.id === select.dataset.status);
-      repair.status = select.value;
+      applyStatus(repair, select.value);
       saveState();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-edit]").forEach((trigger) => {
+    trigger.addEventListener("click", () => {
+      state.editingId = trigger.dataset.edit;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-edit-form]").forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const repair = state.repairs.find((item) => item.id === form.dataset.editForm);
+      const data = Object.fromEntries(new FormData(form));
+      repair.location = data.location.trim();
+      repair.title = data.title.trim();
+      repair.priority = data.priority;
+      repair.cost = Number(data.cost || 0);
+      repair.photo = data.photo.trim();
+      repair.note = data.note.trim();
+      applyStatus(repair, data.status);
+      state.editingId = null;
+      saveState();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-cancel]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.editingId = null;
       render();
     });
   });
