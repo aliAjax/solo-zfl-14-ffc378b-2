@@ -14,6 +14,18 @@ const priorities = {
   low: "低优先级"
 };
 
+const sorts = {
+  created: "最新创建",
+  costDesc: "费用从高到低",
+  costAsc: "费用从低到高",
+  priority: "按优先级"
+};
+
+const priorityRank = { high: 0, medium: 1, low: 2 };
+
+// 老数据没有创建时间：按数组顺序（新增一直 unshift，越靠前越新）给一个稳定的兜底时间
+const FALLBACK_TIME_BASE = Date.UTC(2026, 0, 1);
+
 let state = loadState();
 let storageWritable = true;
 const app = document.querySelector("#app");
@@ -21,6 +33,10 @@ const app = document.querySelector("#app");
 function defaultState() {
   return {
     filter: "all",
+    locationFilter: "all",
+    priorityFilter: "all",
+    sort: "created",
+    keyword: "",
     editingId: null,
     repairs: [
       {
@@ -32,7 +48,8 @@ function defaultState() {
         status: "todo",
         photo: "",
         note: "先检查软管接口",
-        completedAt: null
+        completedAt: null,
+        createdAt: new Date().toISOString()
       }
     ]
   };
@@ -40,7 +57,7 @@ function defaultState() {
 
 // 数据损坏时的安全回退：空列表，不编造任何维修记录
 function emptyState() {
-  return { filter: "all", editingId: null, repairs: [] };
+  return { filter: "all", locationFilter: "all", priorityFilter: "all", sort: "created", keyword: "", editingId: null, repairs: [] };
 }
 
 function loadState() {
@@ -66,15 +83,27 @@ function loadState() {
 
   let repairs;
   try {
-    repairs = parsed.repairs.map(normalizeRepair);
+    repairs = parsed.repairs.map((raw, index) => normalizeRepair(raw, index));
   } catch {
     return recover();
   }
   // 任一事项字段缺失或非法，整份数据视为不可用
   if (repairs.some((repair) => !repair)) return recover();
 
-  const filter = typeof parsed.filter === "string" && parsed.filter in statuses ? parsed.filter : "all";
-  return { filter, editingId: null, repairs };
+  const locations = new Set(repairs.map((repair) => repair.location));
+  return {
+    filter: validEnum(parsed.filter, statuses, "all"),
+    locationFilter: typeof parsed.locationFilter === "string" && locations.has(parsed.locationFilter) ? parsed.locationFilter : "all",
+    priorityFilter: validEnum(parsed.priorityFilter, priorities, "all"),
+    sort: validEnum(parsed.sort, sorts, "created"),
+    keyword: typeof parsed.keyword === "string" ? parsed.keyword : "",
+    editingId: null,
+    repairs
+  };
+}
+
+function validEnum(value, options, fallback) {
+  return typeof value === "string" && value in options ? value : fallback;
 }
 
 // 坏数据无法修复：回退空数据并立刻写回，避免下次刷新继续读到坏数据
@@ -88,16 +117,19 @@ function recover() {
   return fallback;
 }
 
-function normalizeRepair(raw) {
+function normalizeRepair(raw, index = 0) {
   if (!raw || typeof raw !== "object") throw new Error("invalid repair");
 
-  const { id, location, title, priority, cost, status, photo, note, completedAt } = raw;
+  const { id, location, title, priority, cost, status, photo, note, completedAt, createdAt } = raw;
   if (typeof location !== "string" || !location.trim()) return null;
   if (typeof title !== "string" || !title.trim()) return null;
   if (!(priority in priorities)) return null;
   if (!(status in statuses) || status === "all") return null;
 
   const doneAt = status === "done" && typeof completedAt === "string" && !Number.isNaN(new Date(completedAt).getTime()) ? completedAt : null;
+  const validCreatedAt = typeof createdAt === "string" && !Number.isNaN(new Date(createdAt).getTime())
+    ? createdAt
+    : new Date(FALLBACK_TIME_BASE - index * 1000).toISOString();
   return {
     id: typeof id === "string" && id ? id : crypto.randomUUID(),
     location,
@@ -107,7 +139,8 @@ function normalizeRepair(raw) {
     status,
     photo: typeof photo === "string" ? photo : "",
     note: typeof note === "string" ? note : "",
-    completedAt: doneAt
+    completedAt: doneAt,
+    createdAt: validCreatedAt
   };
 }
 
@@ -132,7 +165,7 @@ function applyStatus(repair, nextStatus) {
 }
 
 function render() {
-  const repairs = filteredRepairs();
+  const repairs = visibleRepairs();
   const unfinished = state.repairs.filter((repair) => repair.status !== "done");
   const finished = state.repairs.filter((repair) => repair.status === "done");
   const totalCost = unfinished.reduce((total, repair) => total + (Number(repair.cost) || 0), 0);
@@ -174,8 +207,29 @@ function render() {
           <div class="toolbar">
             ${Object.entries(statuses).map(([value, label]) => `<button class="seg ${state.filter === value ? "active" : ""}" data-filter="${value}">${label}</button>`).join("")}
           </div>
+          <div class="controls">
+            <label class="control">位置
+              <select data-control="locationFilter">
+                <option value="all" ${state.locationFilter === "all" ? "selected" : ""}>全部位置</option>
+                ${locationOptions().map((location) => `<option value="${escapeHtml(location)}" ${state.locationFilter === location ? "selected" : ""}>${escapeHtml(location)}</option>`).join("")}
+              </select>
+            </label>
+            <label class="control">优先级
+              <select data-control="priorityFilter">
+                <option value="all" ${state.priorityFilter === "all" ? "selected" : ""}>全部优先级</option>
+                ${Object.entries(priorities).map(([value, label]) => `<option value="${value}" ${state.priorityFilter === value ? "selected" : ""}>${label}</option>`).join("")}
+              </select>
+            </label>
+            <label class="control">排序
+              <select data-control="sort">
+                ${Object.entries(sorts).map(([value, label]) => `<option value="${value}" ${state.sort === value ? "selected" : ""}>${label}</option>`).join("")}
+              </select>
+            </label>
+            <input class="control search" type="search" data-control="keyword" placeholder="搜索位置、问题或备注" value="${escapeHtml(state.keyword)}">
+          </div>
+          <div class="result-meta">共 ${repairs.length} 条匹配事项</div>
           <div class="repairs">
-            ${repairs.length ? repairs.map(renderRepair).join("") : `<div class="empty">当前状态下没有维修事项</div>`}
+            ${repairs.length ? repairs.map(renderRepair).join("") : `<div class="empty">${state.keyword || state.locationFilter !== "all" || state.priorityFilter !== "all" || state.filter !== "all" ? "没有符合筛选条件的维修事项" : "当前状态下没有维修事项"}</div>`}
           </div>
         </section>
       </section>
@@ -265,7 +319,8 @@ function bindEvents() {
       status: data.status,
       photo: data.photo.trim(),
       note: data.note.trim(),
-      completedAt: null
+      completedAt: null,
+      createdAt: new Date().toISOString()
     };
     applyStatus(repair, data.status);
     state.repairs.unshift(repair);
@@ -279,6 +334,25 @@ function bindEvents() {
       saveState();
       render();
     });
+  });
+
+  document.querySelectorAll("[data-control]").forEach((control) => {
+    const key = control.dataset.control;
+    const apply = () => {
+      state[key] = control.value;
+      saveState();
+      render();
+      if (key === "keyword") {
+        // 整页重绘会让搜索框失焦：恢复焦点与光标，保证可以连续输入
+        const input = document.querySelector('[data-control="keyword"]');
+        if (input) {
+          const cursor = control.value.length;
+          input.focus();
+          input.setSelectionRange(cursor, cursor);
+        }
+      }
+    };
+    control.addEventListener(key === "keyword" ? "input" : "change", apply);
   });
 
   document.querySelectorAll("[data-status]").forEach((select) => {
@@ -331,9 +405,35 @@ function bindEvents() {
   });
 }
 
-function filteredRepairs() {
-  if (state.filter === "all") return state.repairs;
-  return state.repairs.filter((repair) => repair.status === state.filter);
+function visibleRepairs() {
+  const keyword = state.keyword.trim().toLowerCase();
+  const list = state.repairs.filter((repair) => {
+    if (state.filter !== "all" && repair.status !== state.filter) return false;
+    if (state.locationFilter !== "all" && repair.location !== state.locationFilter) return false;
+    if (state.priorityFilter !== "all" && repair.priority !== state.priorityFilter) return false;
+    if (keyword) {
+      const haystack = `${repair.location} ${repair.title} ${repair.note}`.toLowerCase();
+      if (!haystack.includes(keyword)) return false;
+    }
+    return true;
+  });
+
+  const byCreated = (a, b) => new Date(b.createdAt) - new Date(a.createdAt);
+  switch (state.sort) {
+    case "costDesc":
+      return list.sort((a, b) => b.cost - a.cost || byCreated(a, b));
+    case "costAsc":
+      return list.sort((a, b) => a.cost - b.cost || byCreated(a, b));
+    case "priority":
+      return list.sort((a, b) => priorityRank[a.priority] - priorityRank[b.priority] || byCreated(a, b));
+    case "created":
+    default:
+      return list.sort(byCreated);
+  }
+}
+
+function locationOptions() {
+  return [...new Set(state.repairs.map((repair) => repair.location))].sort((a, b) => a.localeCompare(b, "zh-CN"));
 }
 
 function escapeHtml(value) {

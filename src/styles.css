@@ -163,6 +163,37 @@ textarea {
   margin-bottom: 14px;
 }
 
+.controls {
+  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.control {
+  color: #5c655b;
+  display: grid;
+  font-size: 0.82rem;
+  font-weight: 700;
+  gap: 5px;
+  min-width: 130px;
+}
+
+.control.search {
+  flex: 1 1 200px;
+  font-size: 0.9rem;
+  font-weight: 400;
+  min-height: 42px;
+}
+
+.result-meta {
+  color: #6e756d;
+  font-size: 0.82rem;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
 .seg {
   background: #e9eee6;
   border-radius: 999px;
