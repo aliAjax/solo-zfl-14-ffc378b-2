@@ -15,6 +15,7 @@ const priorities = {
 };
 
 let state = loadState();
+let storageWritable = true;
 const app = document.querySelector("#app");
 
 function defaultState() {
@@ -111,7 +112,13 @@ function normalizeRepair(raw) {
 }
 
 function saveState() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    storageWritable = true;
+  } catch {
+    // 存储不可用（配额超限/隐私模式）：保留内存中的当前页数据，不阻断页面
+    storageWritable = false;
+  }
 }
 
 // 统一处理状态切换：切到已完成时记录完成时间，离开已完成时清空
@@ -134,6 +141,7 @@ function render() {
 
   app.innerHTML = `
     <main class="shell">
+      ${storageWritable ? "" : `<div class="storage-warning" role="alert">本地存储当前不可用，本次改动在刷新后可能丢失；页面功能仍可正常使用。</div>`}
       <header class="header">
         <div>
           <p class="eyebrow">本地家庭维护台</p>

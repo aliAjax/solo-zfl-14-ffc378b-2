@@ -31,6 +31,18 @@ button {
   padding: 24px;
 }
 
+.storage-warning {
+  background: #f4deb4;
+  border: 1px solid #d9b36c;
+  border-radius: 8px;
+  color: #694c21;
+  font-size: 0.88rem;
+  font-weight: 700;
+  margin: 0 auto 16px;
+  max-width: 1240px;
+  padding: 10px 14px;
+}
+
 .header {
   align-items: end;
   display: flex;
